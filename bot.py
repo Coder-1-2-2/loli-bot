@@ -16,8 +16,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 
 if not TOKEN:
-    raise ValueError("❌ ERROR: No se encontró el token en las variables de entorno. "
-                     "Por favor, configura DISCORD_BOT_TOKEN.")
+    raise ValueError("❌ ERROR: No se encontró el token en las variables de entorno. ")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -81,7 +80,7 @@ class DonateView(discord.ui.View):
         self.add_item(discord.ui.Button(
             label="⭐ Github",
             style=discord.ButtonStyle.link,
-            url="https://github.com",
+            url="https://github.com/coder122/lolicon-bot",
             emoji="⭐"
         ))
 
@@ -147,7 +146,7 @@ class LoliconSearchView(discord.ui.View):
         
         # Añadir recordatorio de donación (aleatorio, 20% de probabilidad)
         if random.random() < 0.2:
-            embed.set_footer(text=f"❤️ ¿Te gusta el bot? Considera donar con /donate • {time.strftime('%H:%M:%S')}")
+            embed.set_footer(text=f"❤️ ¿Te gusta el bot? Considera donar con /loli_donate • {time.strftime('%H:%M:%S')}")
         else:
             embed.set_footer(text=f"Proporcionado por Lolicon API • {time.strftime('%H:%M:%S')}")
         
@@ -372,6 +371,15 @@ class SearchModal(discord.ui.Modal, title="🔍 Búsqueda Avanzada"):
             style=discord.TextStyle.short
         )
         
+        self.ai_input = discord.ui.TextInput(
+            label="AI (0=Todos, 1=Solo IA, 2=Solo no IA)",
+            placeholder="0",
+            default="0",
+            required=False,
+            max_length=1,
+            style=discord.TextStyle.short
+        )
+        
         self.num_input = discord.ui.TextInput(
             label="Número de imágenes (1-20)",
             placeholder="10",
@@ -384,12 +392,14 @@ class SearchModal(discord.ui.Modal, title="🔍 Búsqueda Avanzada"):
         self.add_item(self.tags_input)
         self.add_item(self.uid_input)
         self.add_item(self.r18_input)
+        self.add_item(self.ai_input)
         self.add_item(self.num_input)
     
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         
         try:
+            # Validar R18
             r18_value_str = self.r18_input.value.strip()
             if not r18_value_str:
                 r18_value = 0
@@ -401,6 +411,18 @@ class SearchModal(discord.ui.Modal, title="🔍 Búsqueda Avanzada"):
                 except ValueError:
                     r18_value = 0
             
+            # Validar AI
+            ai_value_str = self.ai_input.value.strip()
+            if not ai_value_str:
+                ai_value = 0
+            else:
+                try:
+                    ai_value = int(ai_value_str)
+                    if ai_value not in [0, 1, 2]:
+                        ai_value = 0
+                except ValueError:
+                    ai_value = 0
+            
             if r18_value == 1 and not self.is_dm and not interaction.channel.nsfw:
                 await interaction.followup.send(
                     "❌ Las imágenes R18 solo pueden buscarse en canales NSFW",
@@ -410,6 +432,7 @@ class SearchModal(discord.ui.Modal, title="🔍 Búsqueda Avanzada"):
             
             params = {
                 'r18': r18_value,
+                'aiType': ai_value,
                 'num': min(int(self.num_input.value) if self.num_input.value.strip().isdigit() else 10, 20),
                 'size': ['original'],
                 'proxy': 'i.yuki.sh',
@@ -530,9 +553,10 @@ async def cleanup_sessions_task():
 @app_commands.describe(
     tags="Tags para buscar (separados por comas)",
     num="Número de imágenes (1-20)",
-    r18="Filtro R18 (0=Safe, 1=R18, 2=Ambos)"
+    r18="Filtro R18 (0=Safe, 1=R18, 2=Ambos)",
+    ai="Filtro AI (0=Todos, 1=Solo IA, 2=Solo no IA)"
 )
-async def loli_command(interaction: discord.Interaction, tags: Optional[str] = None, num: int = 10, r18: int = 0):
+async def loli_command(interaction: discord.Interaction, tags: Optional[str] = None, num: int = 10, r18: int = 0, ai: int = 0):
     is_dm = interaction.guild is None
     
     if r18 == 1 and not is_dm and not interaction.channel.nsfw:
@@ -541,6 +565,7 @@ async def loli_command(interaction: discord.Interaction, tags: Optional[str] = N
     
     params = {
         'r18': min(max(r18, 0), 2),
+        'aiType': min(max(ai, 0), 2),
         'num': min(max(num, 1), 20),
         'size': ['original'],
         'proxy': 'i.yuki.sh',
@@ -552,13 +577,17 @@ async def loli_command(interaction: discord.Interaction, tags: Optional[str] = N
     await search_and_send_images(interaction, params, is_dm)
 
 @bot.tree.command(name="loli_random", description="Imágenes aleatorias de anime")
-@app_commands.describe(num="Número de imágenes (1-20)")
-async def loli_random_command(interaction: discord.Interaction, num: int = 5):
+@app_commands.describe(
+    num="Número de imágenes (1-20)",
+    ai="Filtro AI (0=Todos, 1=Solo IA, 2=Solo no IA)"
+)
+async def loli_random_command(interaction: discord.Interaction, num: int = 5, ai: int = 0):
     popular_tags = ["girl", "solo", "blue_archive", "genshin", "original", 
                    "landscape", "fantasy", "maid", "swimsuit", "twintails"]
     
     params = {
         'r18': 0,
+        'aiType': min(max(ai, 0), 2),
         'num': min(max(num, 1), 20),
         'size': ['original'],
         'tag': [random.choice(popular_tags)],
@@ -649,8 +678,8 @@ async def loli_restore_command(interaction: discord.Interaction, json_file: disc
     except Exception as e:
         await interaction.followup.send(f"❌ Error al restaurar la sesión: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="donate", description="¡Apoya el desarrollo del bot!")
-async def donate_command(interaction: discord.Interaction):
+@bot.tree.command(name="loli_donate", description="¡Apoya el desarrollo del bot!")
+async def loli_donate_command(interaction: discord.Interaction):
     """Comando para donaciones"""
     embed = discord.Embed(
         title="❤️ ¡Apoya el desarrollo del bot!",
@@ -696,13 +725,13 @@ async def loli_info_command(interaction: discord.Interaction):
     
     embed.add_field(
         name="📋 Comandos Principales",
-        value="""/loli [tags] [num] [r18] - Búsqueda básica
-/loli_random [num] - Imágenes aleatorias
+        value="""/loli [tags] [num] [r18] [ai] - Búsqueda básica
+/loli_random [num] [ai] - Imágenes aleatorias
 /loli_advanced - Búsqueda avanzada
 /loli_sessions - Ver sesiones activas
 /loli_restore - Restaurar sesión desde JSON
-/loli_info - Esta información
-/donate - ¡Apoya el desarrollo!""",
+/loli_donate - ¡Apoya el desarrollo!
+/loli_info - Esta información""",
         inline=False
     )
     
@@ -712,7 +741,8 @@ async def loli_info_command(interaction: discord.Interaction):
 • **Guardar/restaurar** búsquedas
 • **Enviar todas** las imágenes por DM
 • **Sin filtro NSFW** en mensajes privados
-• **Navegación completa** entre imágenes""",
+• **Navegación completa** entre imágenes
+• **Filtros AI y R18** configurables""",
         inline=False
     )
     
@@ -730,7 +760,7 @@ async def loli_info_command(interaction: discord.Interaction):
               "• Servidor 24/7\n"
               "• Mejorar APIs premium\n"
               "• Desarrollo continuo\n\n"
-              f"Considera donar con `/donate` para ayudar ❤️",
+              f"Considera donar con `/loli_donate` para ayudar ❤️",
         inline=False
     )
 
@@ -762,7 +792,7 @@ async def ping(ctx):
     )
     
     if random.random() < 0.3:
-        embed.set_footer(text="❤️ ¿Te gusta el bot? Considera donar con /donate")
+        embed.set_footer(text="❤️ ¿Te gusta el bot? Considera donar con /loli_donate")
     
     await ctx.send(embed=embed)
 
